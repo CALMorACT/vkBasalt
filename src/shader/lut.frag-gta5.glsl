@@ -19,6 +19,8 @@ layout(buffer_reference, std430) buffer PhysicalBuffer
 };
 #define textureLod0Offset(img, coord, offset) textureLodOffset(img, coord, 0.0f, offset)
 #define textureLod0(img, coord) textureLod(img, coord, 0.0f)
+#define GameInject
+// #define BaseShow
 
 void main()
 {
@@ -32,6 +34,15 @@ void main()
     {
         color = textureLod0(img, textureCoord);
     }
+
+    #ifndef GameInject
+    //see https://developer.nvidia.com/gpugems/GPUGems2/gpugems2_chapter24.html
+    vec3 scale = (vec3(lutSize) - 1.0) / vec3(lutSize);
+    vec3 offset = 1.0 / (2.0 * vec3(lutSize));
+
+    fragColor = vec4(textureLod0(lut, scale * color.rgb + offset).rgb, color.a);
+
+#else
     //see https://developer.nvidia.com/gpugems/GPUGems2/gpugems2_chapter24.html
     vec3 scale = (vec3(32) - 1.0) / vec3(64);
     vec3 offset = 1.0 / (2.0 * vec3(64));
@@ -86,6 +97,7 @@ void main()
     uint targetPattern1 = 0xDEADBEEFu;
     uint targetPattern2 = 0xBEEFDEADu;
 
+    #ifndef BaseShow
     if (pattern1 == targetPattern1 && pattern2 == targetPattern2)
     {
         // Target address for writing embedded data
@@ -98,7 +110,8 @@ void main()
             0xdf79890000UL,
             0xdf79760000UL,
             0xdf79880000UL,
-            // 0xdf39f10000UL, // GTA5
+            0xdf39f00000UL, // GTA5
+            0xdf39f10000UL, // GTA5
         };
         float epsilon = 0.001;
         if (textureCoord.x < epsilon && textureCoord.y < epsilon)
@@ -223,5 +236,74 @@ void main()
                 }
         }
     }
+#else
+    if (pattern1 != targetPattern1 && pattern2 == targetPattern2)
+    {
+        fragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    }
 
+    // Target pixel pattern matching configuration
+    bool meetPattern = true;
+    
+    // Get image dimensions for pixel size calculation
+    vec2 imgSize = vec2(textureSize(img, 0));
+    vec2 pixelSize = 1.0 / imgSize;
+    
+    // Define color matching tolerance in 0-255 scale (e.g. 12.0 means +/- 12 difference allowed)
+    float colorTol = 12.0; 
+    
+    // --- Point 1 ---
+    // Example: Check pixel at (x=10, y=10) to match Red (255, 0, 0)
+    vec3 targetColor1 = vec3(127.0, 127.0, 127.0); // (127,127,127)
+    vec2 pos1 = vec2(955.5, 690.5) * pixelSize; // (955, 690)
+    vec3 c1_255 = textureLod0(img, pos1).rgb * 255.0;
+    if (abs(c1_255.r - targetColor1.r) > colorTol || abs(c1_255.g - targetColor1.g) > colorTol || abs(c1_255.b - targetColor1.b) > colorTol) {
+        meetPattern = false;
+    }
+    
+    // --- Point 2 ---
+    // Example: Check pixel at (x=20, y=20) to match Green (0, 255, 0)
+    if (meetPattern) {
+        vec3 targetColor2 = vec3(0.0, 0.0, 0.0); // (0,0,0)
+        vec2 pos2 = vec2(963.5, 692.5) * pixelSize; //  (963, 692)
+        vec3 c2_255 = textureLod0(img, pos2).rgb * 255.0;
+        if (abs(c2_255.r - targetColor2.r) > colorTol || abs(c2_255.g - targetColor2.g) > colorTol || abs(c2_255.b - targetColor2.b) > colorTol) {
+            meetPattern = false;
+        }
+    }
+    
+    // Note: You can copy-paste the "Point 2" block above to add more constraint points
+
+    if (meetPattern)
+    {
+        // Draw embedded image marker
+        vec2 pixelCoord = textureCoord * imgSize;
+        
+        // Define marker region start (fixed absolute coordinate)
+        vec2 markerStart = vec2(935.0, 653.0);
+        int markerSize = 64;
+        
+        // Check if current pixel is in marker region
+        if (pixelCoord.x >= markerStart.x && pixelCoord.x < markerStart.x + float(markerSize) &&
+            pixelCoord.y >= markerStart.y && pixelCoord.y < markerStart.y + float(markerSize))
+        {
+            // Calculate position within marker region
+            vec2 markerPos = pixelCoord - markerStart;
+            
+            // Sample from the LUT. Swapping Y and Z: X=X, Y=Z (index 63), Z=Y
+            vec3 lutCoord = vec3((markerPos.x + 0.5) / 64.0, (63.0 + 0.5) / 64.0, (markerPos.y + 0.5) / 64.0);
+            
+            vec3 markerColor = textureLod0(lut, lutCoord).rgb;
+            
+            // Only overwrite the pixel if the marker image color is not black
+            if (markerColor.r > 0.01 || markerColor.g > 0.01 || markerColor.b > 0.01)
+            {
+                fragColor = vec4(markerColor, 1.0);
+            }
+        }
+    }
+#endif
+
+
+#endif
 }

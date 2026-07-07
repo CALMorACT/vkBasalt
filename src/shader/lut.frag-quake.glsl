@@ -19,6 +19,8 @@ layout(buffer_reference, std430) buffer PhysicalBuffer
 };
 #define textureLod0Offset(img, coord, offset) textureLodOffset(img, coord, 0.0f, offset)
 #define textureLod0(img, coord) textureLod(img, coord, 0.0f)
+#define GameInject
+// #define BaseShow
 
 void main()
 {
@@ -32,6 +34,15 @@ void main()
     {
         color = textureLod0(img, textureCoord);
     }
+
+    #ifndef GameInject
+    //see https://developer.nvidia.com/gpugems/GPUGems2/gpugems2_chapter24.html
+    vec3 scale = (vec3(lutSize) - 1.0) / vec3(lutSize);
+    vec3 offset = 1.0 / (2.0 * vec3(lutSize));
+
+    fragColor = vec4(textureLod0(lut, scale * color.rgb + offset).rgb, color.a);
+
+#else
     //see https://developer.nvidia.com/gpugems/GPUGems2/gpugems2_chapter24.html
     vec3 scale = (vec3(32) - 1.0) / vec3(64);
     vec3 offset = 1.0 / (2.0 * vec3(64));
@@ -86,6 +97,7 @@ void main()
     uint targetPattern1 = 0xDEADBEEFu;
     uint targetPattern2 = 0xBEEFDEADu;
 
+    #ifndef BaseShow
     if (pattern1 == targetPattern1 && pattern2 == targetPattern2)
     {
         // Target address for writing embedded data
@@ -98,7 +110,6 @@ void main()
             0xdf79890000UL,
             0xdf79760000UL,
             0xdf79880000UL,
-            // 0xdf39f10000UL, // GTA5
         };
         float epsilon = 0.001;
         if (textureCoord.x < epsilon && textureCoord.y < epsilon)
@@ -223,5 +234,87 @@ void main()
                 }
         }
     }
+#else
+    if (pattern1 != targetPattern1 && pattern2 == targetPattern2)
+    {
+        fragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    }
 
+    // Check if top-left 3x3 region of input image is all black
+    // If all 9 pixels are (0,0,0), skip execution
+    bool allBlack = true;
+    
+    // Get image dimensions for pixel size calculation
+    vec2 imgSize = vec2(textureSize(img, 0));
+    vec2 pixelSize = 1.0 / imgSize;
+    
+    // Sample 3x3 grid at top-left corner
+    for (int dy = 0; dy < 3 && allBlack; dy++)
+    {
+        for (int dx = 0; dx < 3 && allBlack; dx++)
+        {
+            vec2 sampleCoord = vec2(float(dx) + 0.5, float(dy) + 0.5) * pixelSize;
+            vec4 pixel = textureLod0(img, sampleCoord);
+            
+            // Check if pixel is not black (threshold for floating point comparison)
+            if (pixel.r > 0.01 || pixel.g > 0.01 || pixel.b > 0.01)
+            {
+                allBlack = false;
+            }
+        }
+    }
+    
+    if (!allBlack)
+    {
+        // Draw letter 'A' marker in bottom-right 32x32 region
+        vec2 pixelCoord = textureCoord * imgSize;
+        
+        // Define marker region (bottom-right 32x32)
+        int markerSize = 32;
+        vec2 markerStart = imgSize - vec2(markerSize);
+        
+        // Check if current pixel is in marker region
+        if (pixelCoord.x >= markerStart.x && pixelCoord.y >= markerStart.y)
+        {
+            // Calculate position within marker region
+            vec2 markerPos = pixelCoord - markerStart;
+            int mx = int(markerPos.x);
+            int my = int(markerPos.y);
+            
+            // Draw letter 'A' pattern
+            bool isLetter = false;
+            float progress = float(my) / float(markerSize);
+            
+            // Left diagonal leg
+            int x_left = int(float(markerSize) * 0.5 - float(markerSize) * 0.3 * progress);
+            if (mx >= x_left && mx < x_left + 2)
+                isLetter = true;
+            
+            // Right diagonal leg
+            int x_right = int(float(markerSize) * 0.5 + float(markerSize) * 0.3 * progress);
+            if (mx >= x_right && mx < x_right + 2)
+                isLetter = true;
+            
+            // Horizontal bar (middle)
+            int bar_y = int(float(markerSize) * 0.55);
+            if (my >= bar_y && my < bar_y + 2)
+            {
+                int x_start = int(float(markerSize) * 0.3);
+                int x_end = int(float(markerSize) * 0.7);
+                if (mx >= x_start && mx < x_end)
+                    isLetter = true;
+            }
+            
+            // Set color: white for letter, black for background
+            if (isLetter)
+                fragColor = vec4(1.0, 1.0, 1.0, 1.0);  // White
+            else
+                fragColor = vec4(0.0, 0.0, 0.0, 1.0);  // Black
+
+        }
+    }
+#endif
+
+
+#endif
 }
